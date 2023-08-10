@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Drive API Quickstart</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css" />
+</head>
+
+<body>
+    <section class="section">
+        <div class="container">
+            <h1 class="title">Drive API Quickstart</h1>
+
+            <div class="buttons">
+                <!--Add buttons to initiate auth sequence and sign out-->
+                <button id="authorize_button" class="button is-primary" onclick="handleAuthClick()">Authorize</button>
+                <button id="signout_button" class="button is-warning" onclick="handleSignoutClick()">Sign Out</button>
+            </div>
+
+            <div class="select">
+                <select id="forms_select">
+                    <option selected disabled>Select a Google Form</option>
+                </select>
+            </div>
+
+            <pre id="content" class="box"></pre>
+        </div>
+    </section>
+
+    <script type="text/javascript">
+        /* exported gapiLoaded */
+        /* exported gisLoaded */
+        /* exported handleAuthClick */
+        /* exported handleSignoutClick */
+
+        // TODO(developer): Set to client ID and API key from the Develo
+        // TODO(developer): Set to client ID and API key from the Developer Console
+        const CLIENT_ID = '893961761740-2tgbbo3v6i9n8e6ltb6dempbk1di6rqh.apps.googleusercontent.com';
+        const API_KEY = 'AIzaSyCWJBEKHO_rBd2fpzL1bgomLAyfIc8XmIA';
+
+        // Discovery doc URL for APIs used by the quickstart
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+
+        // Authorization scopes required by the API; multiple scopes can be
+        // included, separated by spaces.
+        const SCOPES =
+            'https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/forms.responses.readonly';
+
+        let tokenClient;
+        let gapiInited = false;
+        let gisInited = false;
+
+        document.getElementById('authorize_button').style.visibility = 'hidden';
+        document.getElementById('signout_button').style.visibility = 'hidden';
+
+        /**
+         * Callback after api.js is loaded.
+         */
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+            gapi.load('forms', 'v1');
+        }
+        var accessToken
+
+        /**
+         * Callback after the API client is loaded. Loads the
+         * discovery doc to initialize the API.
+         */
+        async function initializeGapiClient() {
+            await gapi.client.init({
+                apiKey: API_KEY,
+                discoveryDocs: [DISCOVERY_DOC]
+            });
+            gapiInited = true;
+            maybeEnableButtons();
+        }
+
+        /**
+         * Callback after Google Identity Services are loaded.
+         */
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: '', // defined later
+            });
+            gisInited = true;
+            maybeEnableButtons();
+        }
+
+        /**
+         * Enables user interaction after all libraries are loaded.
+         */
+        function maybeEnableButtons() {
+            if (gapiInited && gisInited) {
+                document.getElementById('authorize_button').style.visibility = 'visible';
+            }
+        }
+
+        /**
+         *  Sign in the user upon button click.
+         */
+        function handleAuthClick() {
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) {
+                    throw (resp);
+                }
+                document.getElementById('signout_button').style.visibility = 'visible';
+                document.getElementById('authorize_button').innerText = 'Refresh';
+                await listFiles();
+            };
+
+            if (gapi.client.getToken() === null) {
+                // Prompt the user to select a Google Account and ask for consent to share their data
+                // when establishing a new session.
+                tokenClient.requestAccessToken({
+                    prompt: 'consent'
+                });
+            } else { // Skip display of account chooser and consent dialog for an existing session.
+                tokenClient.requestAccessToken({
+                    prompt: ''
+                });
+            }
+        }
+
+        /**
+         *  Sign out the user upon button click.
+         */
+        function handleSignoutClick() {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token);
+                gapi.client.setToken('');
+                document.getElementById('content').innerText = '';
+                document.getElementById('authorize_button').innerText = 'Authorize';
+                document.getElementById('signout_button').style.visibility = 'hidden';
+            }
+        }
+
+        async function listFiles() {
+            // get the bearer token
+            accessToken = gapi.client.getToken();
+            let response;
+            try {
+                response = await gapi.client.drive.files.list({
+                    'q': "mimeType='application/vnd.google-apps.form'",
+                    'pageSize': 50,
+                    'fields': 'files(id, name, webViewLink)'
+                });
+            } catch (err) {
+                document.getElementById('content').innerText = err.message;
+                return;
+            }
+            const forms = response.result.files;
+            if (!forms || forms.length == 0) {
+                document.getElementById('content').innerText = 'No Google Forms found.';
+                return;
+            }
+
+            // Append options to select element
+            const selectEl = document.getElementById('forms_select');
+            console.log('forms', forms);
+            forms.forEach((form) => {
+                const optionEl = document.createElement('option');
+                optionEl.textContent = form.name;
+                optionEl.value = form.id;
+                selectEl.appendChild(optionEl);
+            });
+
+            // Update content to indicate success
+            document.getElementById('content').innerText = 'Google Forms successfully loaded.';
+            const select = document.getElementById('forms-select');
+            let formId;
+
+            selectEl.addEventListener('change', () => {
+                formId = selectEl.value;
+                //                   displayFormResponses(formId);
+                getFormResponses(formId, function (responses) {
+                    console.log(responses);
+                    document.getElementById('content').innerText = JSON.stringify(responses);
+                });
+            });
+        }
+
+
+        function getFormResponses(formId, callback) {
+            var apiUrl = "https://forms.googleapis.com/v1/forms/" + formId + "/responses";
+            fetch(apiUrl, {
+                headers: {
+                    "Authorization": "Bearer " + accessToken['access_token'],
+                    "Content-Type": "application/json"
+                }
+            }).then(response => response.json()).then(data => {
+                callback(data);
+            });
+        }
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+</body>
+
+</html>
